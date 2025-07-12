@@ -3,6 +3,7 @@
 $LOAD_PATH.unshift(__dir__)
 
 require 'httpx'
+require 'yonder/session'
 require 'yonder/version'
 require 'yonder/errors'
 
@@ -17,8 +18,8 @@ module Yonder
     }
 
     attr_accessor :api_host
-    attr_accessor :access_token
-    attr_accessor :refresh_token
+    attr_accessor :session
+    attr_accessor :user_agent
 
     def create_post(user_did:, message:)
       create_record(
@@ -32,36 +33,56 @@ module Yonder
     end
 
     def create_record(user_did:, record:, collection:)
-      post("/com.atproto.repo.createRecord", params: {
-        repo: user_did,
-        collection: collection,
-        record: record
-      })
+      post(
+        endpoint: "/com.atproto.repo.createRecord",
+        params: {
+          repo: user_did,
+          collection: collection,
+          record: record
+        }
+      )
     end
 
     def create_session(username:, password:)
-      post("/com.atproto.server.createSession", params: {
-        identifier: username,
-        password: password
-      })
+      response = post(
+        endpoint: "/com.atproto.server.createSession",
+        params: {
+          identifier: username,
+          password: password
+        }
+      )
+
+      @session = Session.from_json(response)
+      true
     end
 
-    def renew_session(renewal_token)
-      post("/com.atproto.server.refreshSession")
+    def refresh_session
+      response = post(
+        endpoint: "/com.atproto.server.refreshSession",
+        access_token: @session&.refresh_token
+      )
+
+      @session = Session.from_json(response)
+      true
     end
 
-    def get(endpoint)
-      make_api_request(endpoint, method: :get)
+    def get(endpoint:)
+      make_api_request(endpoint: endpoint, method: :get)
     end
 
-    def post(endpoint, params: {})
-      make_api_request(endpoint, method: :post, params: params)
+    def post(endpoint:, params: {}, access_token: nil)
+      make_api_request(endpoint: endpoint, method: :post, params: params, access_token: access_token)
     end
 
     private
 
-    def make_api_request(endpoint, method: :get, params: {})
-      response = http_client.request(method, endpoint, json: params)
+    def make_api_request(endpoint:, method: :get, params: {}, access_token: nil)
+      access_token ||= @session&.access_token
+
+      client = http_client
+      client = client.bearer_auth(access_token) unless access_token.nil?
+
+      response = client.request(method, endpoint, json: params)
 
       response.raise_for_status
       response.json
@@ -73,15 +94,11 @@ module Yonder
     end
 
     def http_client
-      client = HTTPX.with(
+      HTTPX.with(
         origin: @api_host || BASE_URL,
         headers: { "user-agent": @user_agent || "yonder v#{Yonder::VERSION}" },
         base_path: '/xrpc'
       ).plugin(:auth)
-
-      return client if @access_token.nil?
-
-      client.bearer_auth(@access_token)
     end
   end
 end
