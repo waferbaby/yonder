@@ -4,15 +4,34 @@ $LOAD_PATH.unshift(__dir__)
 
 require 'httpx'
 require 'yonder/version'
+require 'yonder/errors'
 
 module Yonder
   class << self
     BASE_URL = "https://bsky.social"
+    COLLECTION_POST = 'app.bsky.feed.post'
+    ERROR_MAPPING = {
+      'AuthMissing' => AuthenticationError,
+      'ExpiredToken' => TokenExpiredError,
+      'InvalidToken' => TokenInvalidError
+    }
 
+    attr_accessor :api_host
     attr_accessor :access_token
     attr_accessor :refresh_token
 
-    def create_record(user_did:, record:, collection: 'app.bsky.feed.post')
+    def create_post(user_did:, message:)
+      create_record(
+        user_did: user_did,
+        record: {
+          text: message,
+          createdAt: Time.now.iso8601
+        },
+        collection: COLLECTION_POST
+      )
+    end
+
+    def create_record(user_did:, record:, collection:)
       post("/com.atproto.repo.createRecord", params: {
         repo: user_did,
         collection: collection,
@@ -46,24 +65,23 @@ module Yonder
 
       response.raise_for_status
       response.json
+    rescue HTTPX::TimeoutError, HTTPX::ResolveError => e
+      raise Yonder::RequestError.new(e.message)
+    rescue HTTPX::HTTPError => e
+      klass = ERROR_MAPPING.dig(e.response.json['error']) || NetworkError
+      raise klass.new(e.response.json['message'])
     end
 
     def http_client
       client = HTTPX.with(
-        origin: BASE_URL,
-        headers: api_headers,
+        origin: @api_host || BASE_URL,
+        headers: { "user-agent": @user_agent || "yonder v#{Yonder::VERSION}" },
         base_path: '/xrpc'
       ).plugin(:auth)
 
       return client if @access_token.nil?
 
       client.bearer_auth(@access_token)
-    end
-
-    def api_headers
-      {
-        "user-agent": @user_agent || "yonder v#{Yonder::VERSION}"
-      }
     end
   end
 end
