@@ -70,13 +70,13 @@ module Yonder
       make_api_request(endpoint: endpoint, method: :get)
     end
 
-    def post(endpoint:, params: {}, access_token: nil)
+    def post(endpoint:, params: nil, access_token: nil)
       make_api_request(endpoint: endpoint, method: :post, params: params, access_token: access_token)
     end
 
     private
 
-    def make_api_request(endpoint:, method: :get, params: {}, access_token: nil)
+    def make_api_request(endpoint:, method: :get, params: nil, access_token: nil)
       access_token ||= @session&.access_token
 
       client = http_client
